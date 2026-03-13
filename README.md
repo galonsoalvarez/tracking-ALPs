@@ -37,7 +37,8 @@ The output is the number of signal events passing all cuts as a function of the 
 ├── data/                      # Place your converted CSV files here
 │   └── <ma_name>.csv
 └── results/                   # Output CSVs (created automatically)
-    └── results_vbf_<settings>_*.csv
+    ├── params.csv
+    └── results_vbf_*.csv
 ```
 
 ---
@@ -64,11 +65,22 @@ The code expects the ALP PDG ID to be `9000005` (edit `ALP_PDG_ID` in `lhe_to_cs
 ### Step 2 — Convert LHE files to CSV
 
 ```bash
-python lhe_to_csv.py Events/run_01/unweighted_events.lhe.gz data/01GeV.csv
+python lhe_to_csv.py Events/run_01/unweighted_events.lhe.gz data/0_1000GeV.csv
 ```
 
-This produces `data/01GeV.csv` in the format expected by the analysis.
+This produces `data/0_1000GeV.csv` in the format expected by the analysis.
 Use `--max-events N` to limit the number of events for testing.
+
+**Filename convention:** CSV filenames must match the output of `ma_to_name` in
+`Analyze_madgraph_output.py`, which formats masses to exactly 4 decimal places
+with dots replaced by underscores:
+
+| m_a (GeV) | Filename stem |
+|-----------|--------------|
+| 0.01 | `0_0100GeV` |
+| 0.1  | `0_1000GeV` |
+| 1.0  | `1_0000GeV` |
+| 10.0 | `10_0000GeV` |
 
 **Output format:** Each event occupies exactly 7 semicolon-delimited rows (no header).
 Each row contains `E,px,py,pz` (comma-separated, in GeV).
@@ -91,7 +103,7 @@ The layout assumed by `lhe_to_csv.py` is:
 >
 > ```python
 > from module_VBF import print_first_event
-> print_first_event('01GeV', data_dir='data')
+> print_first_event('0_1000GeV', data_dir='data')
 > ```
 >
 > The ALP row should have the highest energy among rows 4-6 and satisfy
@@ -100,16 +112,21 @@ The layout assumed by `lhe_to_csv.py` is:
 
 ### Step 3 — Run the analysis
 
+The default mass grid is 32 points log-spaced from 0.01 to 10 GeV
+(`np.logspace(-2, 1, num=32)`), corresponding to indices 0–31.
+
 ```bash
-# Analyse m_a = 0.1 GeV (index 9 in the default ma_list)
+# Analyse a single mass, e.g. index 9
 python Analyze_madgraph_output.py 9
 ```
 
-Results are written to `results/results_vbf_<settings>_*.csv`.
+Results are written to `results/results_vbf_*.csv`, and a `results/params.csv`
+file is written (overwriting any previous one) recording the cut parameters
+used. All masses in a batch must be run with the same parameters.
 To run all masses in parallel on a cluster (e.g. with Slurm):
 
 ```bash
-for i in $(seq 0 21); do sbatch --wrap="python Analyze_madgraph_output.py $i"; done
+for i in $(seq 0 31); do sbatch --wrap="python Analyze_madgraph_output.py $i"; done
 ```
 
 ### Step 4 — Make plots
@@ -202,5 +219,12 @@ not have them.
 ## Citation
 
 If you use this code, please cite the paper for which it was originally
-developed: https://arxiv.org/abs/2302.12262
+developed:
 
+> [Add your paper reference here]
+
+---
+
+## License
+
+[Add your license here]

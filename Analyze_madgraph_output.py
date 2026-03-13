@@ -18,15 +18,18 @@ Example
 
 Output
 ------
-Four CSV files are written (or appended) inside the ``results/`` directory:
+The following files are written inside the ``results/`` directory:
 
-  results_vbf_<file_name>_total.csv     – all events passing pT cut with 2 converted photons
-  results_vbf_<file_name>_separated.csv – additionally requiring track separation > sep_resolution
-  results_vbf_<file_name>_displaced.csv – additionally requiring impact parameter > vertex_displacement
-  results_vbf_<file_name>_isolated.csv  – additionally requiring Delta-R < DeltaR_max
+  params.csv                   – cut parameters used in this run (overwritten each run)
+  results_vbf_total.csv        – all events passing pT cut with 2 converted photons
+  results_vbf_separated.csv    – additionally requiring track separation > sep_resolution
+  results_vbf_displaced.csv    – additionally requiring impact parameter > vertex_displacement
+  results_vbf_isolated.csv     – additionally requiring Delta-R < DeltaR_max
 
-Each file has one header row of g_agg values, then one row per ALP mass with
-the event counts for each g_agg point.
+The four results CSVs have one header row of g_agg values, then one row per
+ALP mass with the event counts for each g_agg point.  The params CSV is
+overwritten on every run — all masses in a batch should be run with the same
+cut parameters.
 
 Input data
 ----------
@@ -70,18 +73,11 @@ from module_VBF import (
 ## ma_name must match the filename stem in data/<ma_name>.csv.
 ################################################
 
-ma_list = [
-    0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,
-    0.1,  0.2,  0.3,  0.4,  0.5,  0.6,  0.7,  0.8,  0.9,
-    1.,   2.,   5.,   10.
-]
+ma_list = np.logspace(-2,1, num=32)
 
 def ma_to_name(ma):
     """Convert an ALP mass (GeV, float) to the filename stub used in data/."""
-    if ma < 1.:
-        return str(ma).replace('.', '') + 'GeV'
-    else:
-        return str(ma).replace('.0', '') + 'GeV'
+    return f"{ma:.4f}GeV".replace('.', '_')
 
 # Parse the mass index from the command line
 ma_value = ma_list[round(float(sys.argv[1]))]
@@ -90,11 +86,11 @@ ma_name  = ma_to_name(ma_value)
 ################################################
 ## g_agg coupling grid
 ## ─────────────────────────────────────────────
-## 56 values log-spaced from 1e-7 to 1e-2 GeV^{-1}.
+## 32 values log-spaced from 1e-7 to 1e-2 GeV^{-1}.
 ## Adjust if you want a different range or density.
 ################################################
 
-gagg_list = np.logspace(-7, -2, num=56)
+gagg_list = np.logspace(-7, -2, num=32)
 
 ################################################
 ## Number of Monte Carlo events
@@ -114,41 +110,48 @@ num_events = 1_000_000
 # Minimum ALP (= diphoton) transverse momentum (GeV).
 # Because the two photons are very collimated, the pT cut is applied on the ALP.
 pT_cut_value = 150    # GeV
-pT_cut_name  = str(pT_cut_value)
 
 # Tracker angular resolution for determining photon track directions (metres).
 TRT_track_resolution = 2.0e-4  # m = 0.2 mm
-TRT_track_res_name   = '02mm'
 
 # Minimum displaced-vertex impact parameter required to tag a decay as displaced (metres).
 vertex_displacement  = 1.0e-1  # m = 10 cm
-vertex_disp_name     = '10cm'
 
 # Minimum track separation required to resolve the two photon tracks (metres).
 TRT_sep_resolution = 5.0e-4  # m = 0.5 mm
-TRT_sep_res_name   = '05mm'
 
 # Maximum Delta-R between the two photons for the pair to pass the ECAL isolation criterion.
 # Uncomment the desired definition:
-DeltaR_max      = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
-DeltaR_max_name = 'ECAL_cell_size'
-# DeltaR_max      = np.sqrt(0.075**2 + 0.123**2)  # ECAL L1 granularity (~0.14)
-# DeltaR_max_name = 'ECAL_L1_gran'
+DeltaR_max = np.sqrt(0.025**2 + 0.0245**2)   # ECAL cell size (~0.035)
+# DeltaR_max = np.sqrt(0.075**2 + 0.123**2)  # ECAL L1 granularity (~0.14)
 
-# Compose the output file-name tag from all cut parameters
-file_name = (
-    f'pT{pT_cut_name}'
-    f'trackres{TRT_track_res_name}'
-    f'disp{vertex_disp_name}'
-    f'sepres{TRT_sep_res_name}'
-    f'DR{DeltaR_max_name}'
-)
+
 
 ################################################
 ## Make sure the output directory exists
 ################################################
 
 os.makedirs('results', exist_ok=True)
+
+################################################
+## Write parameters to file
+## ─────────────────────────────────────────────
+## A params.csv is written (overwriting any previous one) each time the
+## script runs, so the results folder always documents the settings used.
+## All masses in a batch must be run with the same parameters.
+################################################
+
+params = {
+    'run_kind':            'analysis_run',
+    'pT_cut':              pT_cut_value,
+    'track_res':           TRT_track_resolution,
+    'sep_res':             TRT_sep_resolution,
+    'vertex_displacement': vertex_displacement,
+    'Delta_R':             DeltaR_max,
+}
+pd.DataFrame.from_dict(params, orient='index').to_csv(
+    'results/params.csv', header=False
+)
 
 ################################################
 ## Analysis pipeline
@@ -167,20 +170,23 @@ print('Calculating separations ...')
  impact_parameters,
  delta_Rs,
  delta_etas,
- ltracks) = calculate_separations_2converted_displaced_isolated(
+ ltracks,
+ _event_indices) = calculate_separations_2converted_displaced_isolated(
     events,
     gaggs=gagg_list,
     pTcut=pT_cut_value,
     track_resolution=TRT_track_resolution,
-    check=True,          # also return ltracks for potential debugging
+    check=True,          # also return ltracks and event indices for potential debugging
 )
 
 # ── Step 1: remove entries flagged as outside TRT acceptance (value = -1) ──
+# Note: ltracks is not filtered here — it stores 2 values per event (one per
+# photon) so its shape differs from the other arrays. It is available via
+# _event_indices above if needed for debugging.
 average_etas      = [average_etas[i][separations[i] != -1]      for i in range(len(separations))]
 impact_parameters = [impact_parameters[i][separations[i] != -1] for i in range(len(separations))]
 delta_Rs          = [delta_Rs[i][separations[i] != -1]          for i in range(len(separations))]
 delta_etas        = [delta_etas[i][separations[i] != -1]        for i in range(len(separations))]
-ltracks           = [ltracks[i][separations[i] != -1]           for i in range(len(separations))]
 separations       = [x[x != -1] for x in separations]
 
 # ── Step 2: require track separation > TRT_sep_resolution ──
@@ -189,7 +195,6 @@ average_etas_separated      = [average_etas[i][mask_sep[i]]      for i in range(
 impact_parameters_separated = [impact_parameters[i][mask_sep[i]] for i in range(len(separations))]
 delta_Rs_separated          = [delta_Rs[i][mask_sep[i]]          for i in range(len(separations))]
 delta_etas_separated        = [delta_etas[i][mask_sep[i]]        for i in range(len(separations))]
-ltracks_separated           = [ltracks[i][mask_sep[i]]           for i in range(len(separations))]
 separations_separated       = [separations[i][mask_sep[i]]       for i in range(len(separations))]
 
 # ── Step 3: require displaced vertex > vertex_displacement ──
@@ -198,7 +203,6 @@ average_etas_displaced      = [average_etas_separated[i][mask_disp[i]]      for 
 separations_displaced       = [separations_separated[i][mask_disp[i]]       for i in range(len(separations_separated))]
 delta_Rs_displaced          = [delta_Rs_separated[i][mask_disp[i]]          for i in range(len(separations_separated))]
 delta_etas_displaced        = [delta_etas_separated[i][mask_disp[i]]        for i in range(len(separations_separated))]
-ltracks_displaced           = [ltracks_separated[i][mask_disp[i]]           for i in range(len(separations_separated))]
 impact_parameters_displaced = [impact_parameters_separated[i][mask_disp[i]] for i in range(len(separations_separated))]
 
 # ── Step 4: require Delta-R < DeltaR_max (ECAL isolation) ──
@@ -206,7 +210,6 @@ mask_DR                    = [delta_Rs_displaced[i] < DeltaR_max for i in range(
 average_etas_isolated      = [average_etas_displaced[i][mask_DR[i]]      for i in range(len(delta_Rs_displaced))]
 separations_isolated       = [separations_displaced[i][mask_DR[i]]       for i in range(len(delta_Rs_displaced))]
 impact_parameters_isolated = [impact_parameters_displaced[i][mask_DR[i]] for i in range(len(delta_Rs_displaced))]
-ltracks_isolated           = [ltracks_displaced[i][mask_DR[i]]           for i in range(len(delta_Rs_displaced))]
 delta_etas_isolated        = [delta_etas_displaced[i][mask_DR[i]]        for i in range(len(delta_Rs_displaced))]
 delta_Rs_isolated          = [delta_Rs_displaced[i][mask_DR[i]]          for i in range(len(delta_Rs_displaced))]
 
@@ -215,7 +218,6 @@ delta_Rs_isolated          = [delta_Rs_displaced[i][mask_DR[i]]          for i i
 # average_etas_isolated        = [average_etas_displaced[i][mask_Deta[i]]      for i in range(len(delta_etas_displaced))]
 # separations_isolated         = [separations_displaced[i][mask_Deta[i]]       for i in range(len(delta_etas_displaced))]
 # impact_parameters_isolated   = [impact_parameters_displaced[i][mask_Deta[i]] for i in range(len(delta_etas_displaced))]
-# ltracks_isolated             = [ltracks_displaced[i][mask_Deta[i]]           for i in range(len(delta_etas_displaced))]
 # delta_Rs_isolated            = [delta_Rs_displaced[i][mask_Deta[i]]          for i in range(len(delta_etas_displaced))]
 # delta_etas_isolated          = [delta_etas_displaced[i][mask_Deta[i]]        for i in range(len(delta_etas_displaced))]
 
@@ -223,7 +225,7 @@ delta_Rs_isolated          = [delta_Rs_displaced[i][mask_DR[i]]          for i i
 ## Write results to CSV
 ################################################
 
-base = f'results/results_vbf_{file_name}'
+base = 'results/results_vbf'
 
 # Write a header row with g_agg values the first time this mass grid is used
 for suffix in ('_total', '_separated', '_displaced', '_isolated'):
