@@ -202,12 +202,5 @@ not have them.
 ## Citation
 
 If you use this code, please cite the paper for which it was originally
-developed:
+developed: https://arxiv.org/abs/2302.12262
 
-> [Add your paper reference here]
-
----
-
-## License
-
-[Add your license here]
